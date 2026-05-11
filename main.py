@@ -1154,10 +1154,10 @@ async def show_favorites(update, context):
         await reply_service_unavailable(update)
         return
     code_to_nom = {m["code"]: m.get("nom", "-") for m in movies_info}
-    lines = [f"❤️ Sevimli kinolaringiz ({len(fav_codes)} ta):\n"]
+  lines = [f"❤️ Sevimli kinolaringiz ({len(fav_codes)} ta):\n"]
+    nomalum = "Noma'lum"
     for i, code in enumerate(fav_codes, start=1):
-     nomalum = "Noma'lum"
-lines.append(f"{i}. {code_to_nom.get(code, nomalum)}  |  Kod: {code}")
+        lines.append(f"{i}. {code_to_nom.get(code, nomalum)}  |  Kod: {code}")
     lines.append("\nKino olish uchun kodini yuboring.")
     await update.message.reply_text("\n".join(lines))
 
