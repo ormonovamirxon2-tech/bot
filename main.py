@@ -18,7 +18,7 @@ DEFAULT_INSTAGRAM_URL = "https://www.instagram.com/kinotop.bot/"
 INSTAGRAM_CHANNEL_URL = os.environ.get("INSTAGRAM_CHANNEL_URL", "https://www.instagram.com/movie.hub.star?igsh=MTduMjZlc2hyazB6cg==").strip() or DEFAULT_INSTAGRAM_URL
 
 VERIFICATION_BOT_URL = os.environ.get("VERIFICATION_BOT_URL", "https://t.me/gram_prbot?start=7657019165").strip()
-VERIFICATION_WAIT_SECONDS = 15
+VERIFICATION_WAIT_SECONDS = 10
 
 logging.basicConfig(
     level=logging.INFO,
@@ -492,11 +492,23 @@ def get_user_started_at(user_id):
         return None
 
 
+# ─── Verification keyboard ────────────────────────────────────────────────────
+
 def get_verification_keyboard():
+    """Foydalanuvchi start bosganida ko'rsatiladigan obuna tugmasi."""
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("✅ Botga o'tish", url=VERIFICATION_BOT_URL)]]
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Obuna bo'lish",
+                    url=VERIFICATION_BOT_URL,
+                )
+            ]
+        ]
     )
 
+
+# ─── Movie / UI helpers ───────────────────────────────────────────────────────
 
 def get_movie_reply_markup(code, user_id=None):
     rows = []
@@ -624,6 +636,8 @@ def remember_user(update):
     except Exception:
         logger.exception("Foydalanuvchini saqlashda xato yuz berdi")
 
+
+# ─── Admin keyboards ──────────────────────────────────────────────────────────
 
 def get_sifat_keyboard():
     return ReplyKeyboardMarkup(
@@ -755,9 +769,13 @@ async def send_confirm_prompt(update, data):
     )
 
 
+# ─── Conversation states ──────────────────────────────────────────────────────
+
 KOD_VAQT, NOM, SIFAT, TIL, VAQT, CONFIRM, FOLDER_CHOICE, FOLDER_CREATE, FOLDER_PICK = range(9)
 EDIT_KOD, EDIT_NOM, EDIT_SIFAT, EDIT_TIL, EDIT_VAQT = range(9, 14)
 
+
+# ─── Error handler ────────────────────────────────────────────────────────────
 
 async def log_error(update: object, context):
     logger.exception("Telegram handler error", exc_info=context.error)
@@ -770,10 +788,20 @@ async def reply_service_unavailable(update):
         await update.callback_query.message.reply_text(SERVICE_UNAVAILABLE_TEXT)
 
 
+# ─── /start ───────────────────────────────────────────────────────────────────
+
 async def start(update, context):
+    """
+    Admin uchun: oddiy admin xush kelibsiz xabari.
+    Oddiy foydalanuvchi uchun:
+      1. Obuna bo'lish tugmasi ko'rsatiladi.
+      2. Foydalanuvchini DB ga yozib qo'yadi (started_at FAQAT birinchi marta).
+      3. "10 soniya kuting va qayta yuboring" degan xabar.
+    """
     remember_user(update)
     user_id = update.message.from_user.id
 
+    # ── Admin ──
     if user_id == ADMIN_ID:
         await update.message.reply_text(
             "Salom Admin! Movie HD botiga xush kelibsiz!\n\n"
@@ -782,6 +810,8 @@ async def start(update, context):
         )
         return
 
+    # ── Oddiy foydalanuvchi ──
+    # started_at ni faqat birinchi start da yozamiz
     try:
         mark_user_started(user_id)
     except Exception:
@@ -789,15 +819,17 @@ async def start(update, context):
 
     await update.message.reply_text(
         "🎬 Salom! Movie HD botiga xush kelibsiz!\n\n"
-        "✅ Botdan foydalanish uchun quyidagi botga o'ting va /start bosing:\n\n"
-        "⬇️ Tugmani bosing va start bosing:",
+        "✅ Botdan foydalanish uchun quyidagi botga obuna bo'ling va /start bosing:\n\n"
+        "⬇️ Tugmani bosing, obuna bo'ling va start bosing:",
         reply_markup=get_verification_keyboard(),
     )
     await update.message.reply_text(
-        "⏳ Start bosgandan so'ng 10 soniya kuting va qayta urining.\n\n"
-        "✅ Shundan so'ng bu yerga kino kodini yuboring!"
+        f"⏳ Obuna bo'lgandan so'ng {VERIFICATION_WAIT_SECONDS} soniya kuting va qayta bu yerga kino kodini yuboring!\n\n"
+        "✅ Shundan so'ng kino kodini yuboring — kino darhol yuboriladi!"
     )
 
+
+# ─── Handlers ─────────────────────────────────────────────────────────────────
 
 async def unknown_command(update, context):
     await update.message.reply_text("❓ Bu komanda mavjud emas. Kino kodini yozing.")
@@ -1156,6 +1188,8 @@ async def handle_folder_pick(update, context):
     return await save_to_folder_and_finish(update, context, value)
 
 
+# ─── Edit conversation ────────────────────────────────────────────────────────
+
 async def edit_start(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
@@ -1261,6 +1295,8 @@ async def edit_get_vaqt(update, context):
     return ConversationHandler.END
 
 
+# ─── Admin commands ───────────────────────────────────────────────────────────
+
 async def delete_movie(update, context):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
@@ -1325,6 +1361,8 @@ async def list_series_ranges(update, context):
         lines.append(f"{item['start_code_num']}-{item['end_code_num']} | {item['title']}")
     await update.message.reply_text("\n".join(lines))
 
+
+# ─── Callback handlers ────────────────────────────────────────────────────────
 
 async def handle_series_part_callback(update, context):
     remember_user(update)
@@ -1395,6 +1433,8 @@ async def handle_favorite_callback(update, context):
     await query.answer(notice, show_alert=True)
 
 
+# ─── Favorites ────────────────────────────────────────────────────────────────
+
 async def show_favorites(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
@@ -1434,6 +1474,8 @@ async def show_favorites(update, context):
     await update.message.reply_text("\n".join(lines))
 
 
+# ─── View counter ─────────────────────────────────────────────────────────────
+
 def increment_view_count(code):
     try:
         run_db(lambda col: col.update_one(
@@ -1443,6 +1485,8 @@ def increment_view_count(code):
     except Exception:
         pass
 
+
+# ─── Broadcast ────────────────────────────────────────────────────────────────
 
 async def handle_admin_broadcast_message(update, context):
     global _broadcast_active
@@ -1502,28 +1546,41 @@ async def handle_admin_broadcast_message(update, context):
     )
 
 
+# ─── Main message handler ─────────────────────────────────────────────────────
+
 async def handle_message(update, context):
+    """
+    Foydalanuvchi xabar yuborganda:
+      1. Agar obuna bo'lmagan bo'lsa (started_at yo'q) → obuna tugmasi ko'rsatiladi.
+      2. Agar started_at bor lekin VERIFICATION_WAIT_SECONDS o'tmagan bo'lsa → kutish so'raladi.
+      3. Aks holda → kino kodi bo'yicha kino yuboriladi.
+    """
     remember_user(update)
     user_id = update.message.from_user.id
     text = update.message.text.strip()
 
+    # Admin broadcast mode
     if user_id == ADMIN_ID and _broadcast_active:
         await handle_admin_broadcast_message(update, context)
         return
 
+    # Oddiy foydalanuvchi tekshiruvi
     if user_id != ADMIN_ID:
         started_at = get_user_started_at(user_id)
+
+        # Hali obuna bo'lmagan
         if started_at is None:
             await update.message.reply_text(
-                "⚠️ Botdan foydalanish uchun avval quyidagi botga o'ting va /start bosing:\n\n"
-                "⬇️ Tugmani bosing:",
+                "⚠️ Botdan foydalanish uchun avval quyidagi botga obuna bo'ling va /start bosing:\n\n"
+                "⬇️ Tugmani bosing, obuna bo'ling va start bosing:",
                 reply_markup=get_verification_keyboard(),
             )
             await update.message.reply_text(
-                "⏳ Start bosgandan so'ng 10 soniya kuting va qayta yuboring."
+                f"⏳ Obuna bo'lgandan so'ng {VERIFICATION_WAIT_SECONDS} soniya kuting va qayta yuboring."
             )
             return
 
+        # Obuna bo'lgan lekin kutish vaqti o'tmagan
         elapsed = int(time.time()) - started_at
         if elapsed < VERIFICATION_WAIT_SECONDS:
             remaining = VERIFICATION_WAIT_SECONDS - elapsed
@@ -1532,11 +1589,14 @@ async def handle_message(update, context):
             )
             return
 
+    # Kino kodi tekshiruvi
     if not text.isdigit():
         await update.message.reply_text("Kino kodini yozing.")
         return
 
     code = text
+
+    # Jild tekshiruvi
     try:
         folder_data = get_folder_by_code(code)
     except Exception:
@@ -1555,6 +1615,7 @@ async def handle_message(update, context):
             await send_folder_parts_prompt(update.message, folder_data, folder_movies)
             return
 
+    # Serial tekshiruvi
     try:
         series_data = get_series_range_by_code(code)
     except Exception:
@@ -1573,6 +1634,7 @@ async def handle_message(update, context):
             await send_series_parts_prompt(update.message, series_data, movies)
             return
 
+    # Oddiy kino
     try:
         data = get_movie(code)
     except Exception:
@@ -1588,6 +1650,8 @@ async def handle_message(update, context):
     await send_movie_to_chat(update.message, code, data, user_id=user_id)
 
 
+# ─── Application builder ──────────────────────────────────────────────────────
+
 def build_application():
     ensure_telegram_imports()
     if not BOT_TOKEN:
@@ -1602,15 +1666,15 @@ def build_application():
             MessageHandler(filters.Document.ALL & filters.User(ADMIN_ID), handle_document),
         ],
         states={
-            KOD_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_kod_vaqt)],
-            NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_nom)],
-            SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_sifat)],
-            TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_til)],
-            VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_vaqt)],
-            CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), confirm_save)],
+            KOD_VAQT:      [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_kod_vaqt)],
+            NOM:           [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_nom)],
+            SIFAT:         [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_sifat)],
+            TIL:           [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_til)],
+            VAQT:          [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_vaqt)],
+            CONFIRM:       [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), confirm_save)],
             FOLDER_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_choice)],
             FOLDER_CREATE: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_create)],
-            FOLDER_PICK: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_pick)],
+            FOLDER_PICK:   [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_pick)],
         },
         fallbacks=[],
     )
@@ -1618,10 +1682,10 @@ def build_application():
     edit_conv = ConversationHandler(
         entry_points=[CommandHandler("edit", edit_start)],
         states={
-            EDIT_KOD: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_kod)],
-            EDIT_NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_nom)],
-            EDIT_SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_sifat)],
-            EDIT_TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_til)],
+            EDIT_KOD:  [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_kod)],
+            EDIT_NOM:  [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_nom)],
+            EDIT_SIFAT:[MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_sifat)],
+            EDIT_TIL:  [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_til)],
             EDIT_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_vaqt)],
         },
         fallbacks=[],
@@ -1655,6 +1719,8 @@ def build_application():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
 
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
 
 def run_bot_forever():
     while True:
