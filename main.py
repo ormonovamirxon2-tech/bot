@@ -45,6 +45,9 @@ ReplyKeyboardRemove = None
 MongoClient = None
 PyMongoError = Exception
 
+# ConversationHandler.END qiymati — lazy import muammosini hal qilish uchun
+CONV_END = -1
+
 
 def ensure_telegram_imports():
     global ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes
@@ -80,7 +83,6 @@ def ensure_pymongo_imports():
 
 MONGO_URL = os.environ.get("MONGO_URL", "").strip()
 
-# --- Global connection pool (bir marta ochiladi) ---
 client = None
 db = None
 movies_col = None
@@ -109,7 +111,7 @@ SERIES_CALLBACK_PREFIX = "series_part:"
 _broadcast_active = False
 
 
-# ===================== DB ULANISH (Connection Pool) =====================
+# ===================== DB ULANISH =====================
 
 def _init_db_client():
     global client, db, movies_col, series_col, folders_col, users_col
@@ -379,13 +381,9 @@ def is_favorite(user_id, code):
         return False
 
 
-# ===================== VERIFICATION — TO'G'RILANGAN =====================
+# ===================== VERIFICATION =====================
 
 def mark_user_started(user_id):
-    """
-    MUHIM: started_at faqat birinchi marta yoziladi ($setOnInsert).
-    Qayta /start bossa ham vaqt o'zgarmaydi.
-    """
     run_users_db(lambda col: col.update_one(
         {"user_id": user_id},
         {
@@ -397,10 +395,6 @@ def mark_user_started(user_id):
 
 
 def get_user_started_at(user_id):
-    """
-    Foydalanuvchining started_at vaqtini qaytaradi.
-    DB xatosi bo'lsa None emas, balki 0 qaytaradi — bu foydalanuvchini bloklamaydi.
-    """
     try:
         doc = run_users_db(lambda col: col.find_one({"user_id": user_id}, {"started_at": 1, "_id": 0}))
         if doc and "started_at" in doc:
@@ -412,10 +406,6 @@ def get_user_started_at(user_id):
 
 
 def is_user_verified(user_id):
-    """
-    Foydalanuvchi tasdiqlangan yoki yo'qligini tekshiradi.
-    started_at mavjud VA VERIFICATION_WAIT_SECONDS o'tgan bo'lsa — True.
-    """
     started_at = get_user_started_at(user_id)
     if started_at is None:
         return False, "not_started"
@@ -682,7 +672,6 @@ async def start(update, context):
         )
         return
 
-    # Foydalanuvchi uchun: started_at FAQAT birinchi marta yoziladi
     try:
         mark_user_started(user_id)
     except Exception:
@@ -706,8 +695,11 @@ async def unknown_command(update, context):
 
 
 # ===================== VIDEO/DOCUMENT =====================
+# BUG FIX: ConversationHandler.END o'rniga CONV_END (-1) ishlatiladi
+# chunki ConversationHandler lazy import qilinadi va ba'zan None bo'lib qolishi mumkin
 
 async def handle_video(update, context):
+    global _broadcast_active
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
         return
@@ -721,12 +713,12 @@ async def handle_video(update, context):
         existing_movie = get_movie_by_file_id(context.user_data["file_id"])
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if existing_movie:
         await update.message.reply_text(
             f"⚠️ Bu fayl allaqachon bazada bor.\nKod: {existing_movie['code']}\nNom: {existing_movie['nom']}\n\nBoshqa kino faylini yuboring."
         )
-        return ConversationHandler.END
+        return CONV_END
     context.user_data.pop("vaqt_draft", None)
     context.user_data.pop("vaqt_locked", None)
     try:
@@ -741,6 +733,7 @@ async def handle_video(update, context):
 
 
 async def handle_document(update, context):
+    global _broadcast_active
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
         return
@@ -754,12 +747,12 @@ async def handle_document(update, context):
         existing_movie = get_movie_by_file_id(context.user_data["file_id"])
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if existing_movie:
         await update.message.reply_text(
             f"⚠️ Bu fayl allaqachon bazada bor.\nKod: {existing_movie['code']}\nNom: {existing_movie['nom']}\n\nBoshqa kino faylini yuboring."
         )
-        return ConversationHandler.END
+        return CONV_END
     context.user_data.pop("vaqt_draft", None)
     context.user_data.pop("vaqt_locked", None)
     try:
@@ -797,7 +790,7 @@ async def get_kod_vaqt(update, context):
         exists = movie_exists(code)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if exists:
         try:
             _, next_code = get_last_and_next_movie_code()
@@ -850,7 +843,7 @@ async def confirm_save(update, context):
     choice = update.message.text.strip()
     if choice == CONFIRM_CANCEL_TEXT:
         await update.message.reply_text("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
-        return ConversationHandler.END
+        return CONV_END
     if choice != CONFIRM_SAVE_TEXT:
         await update.message.reply_text("Iltimos, tugmadan birini tanlang.")
         return CONFIRM
@@ -861,7 +854,7 @@ async def confirm_save(update, context):
         save_movie(code, data)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     d["last_sifat"] = d["sifat"]
     d["last_til"] = d["til"]
     d.pop("vaqt_locked", None)
@@ -877,7 +870,7 @@ async def finish_movie_save(update, context, folder_note=None):
         f"✅ Saqlandi.\n\nKod: {d['kod']}\nNom: {d['nom']}\nSifat: {d['sifat']}\nTil: {d['til']}\nDavomiylik: {d['vaqt']}\n{note_text}Keyingi kino uchun yana video yoki fayl yuboring.",
         reply_markup=ReplyKeyboardRemove(),
     )
-    return ConversationHandler.END
+    return CONV_END
 
 
 def get_part_number_in_movies(movies, code):
@@ -895,7 +888,7 @@ async def save_to_folder_and_finish(update, context, folder_name):
         movies = get_movies_for_folder(folder_name)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     part_number = get_part_number_in_movies(movies, code)
     folder_note = f"Jild: {folder_name}\nQism: {part_number}/{len(movies)}" if part_number else f"Jild: {folder_name}"
     return await finish_movie_save(update, context, folder_note=folder_note)
@@ -913,7 +906,7 @@ async def handle_folder_choice(update, context):
             folder_names = get_all_folder_names()
         except Exception:
             await reply_service_unavailable(update)
-            return ConversationHandler.END
+            return CONV_END
         if not folder_names:
             await update.message.reply_text("Hali jildlar yo'q. Avval yangi jild yarating.", reply_markup=get_folder_choice_keyboard())
             return FOLDER_CHOICE
@@ -932,7 +925,7 @@ async def handle_folder_create(update, context):
         exists = folder_exists_by_name(folder_name)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if exists:
         await update.message.reply_text("⚠️ Bu nomli jild bor. Boshqa nom kiriting:")
         return FOLDER_CREATE
@@ -950,7 +943,7 @@ async def handle_folder_pick(update, context):
         folder_names = get_all_folder_names()
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if value not in folder_names:
         await update.message.reply_text("Ro'yxatdan jild tanlang.", reply_markup=build_folder_list_keyboard(folder_names))
         return FOLDER_PICK
@@ -973,10 +966,10 @@ async def edit_get_kod(update, context):
         data = get_movie(code)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     if not data:
         await update.message.reply_text(f"❌ {code} kodli kino topilmadi.")
-        return ConversationHandler.END
+        return CONV_END
     context.user_data['edit_code'] = code
     context.user_data['current_data'] = data
     await update.message.reply_text(
@@ -1022,9 +1015,9 @@ async def edit_get_vaqt(update, context):
         save_movie(d['edit_code'], data)
     except Exception:
         await reply_service_unavailable(update)
-        return ConversationHandler.END
+        return CONV_END
     await update.message.reply_text("✅ Tahrirlandi!", reply_markup=get_admin_menu_keyboard())
-    return ConversationHandler.END
+    return CONV_END
 
 
 # ===================== ADMIN BUYRUQLAR =====================
@@ -1216,25 +1209,22 @@ async def handle_admin_broadcast_message(update, context):
     await update.message.reply_text("\n".join(lines), reply_markup=get_admin_menu_keyboard())
 
 
-# ===================== ASOSIY MESSAGE HANDLER — TO'G'RILANGAN =====================
+# ===================== ASOSIY MESSAGE HANDLER =====================
 
 async def handle_message(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
     text = update.message.text.strip()
 
-    # Admin broadcast mode
     if user_id == ADMIN_ID and _broadcast_active:
         await handle_admin_broadcast_message(update, context)
         return
 
-    # Foydalanuvchi tekshiruvi
     if user_id != ADMIN_ID:
         verified, detail = is_user_verified(user_id)
 
         if not verified:
             if detail == "not_started":
-                # Hali /start bosmagan yoki obuna bo'lmagan
                 await update.message.reply_text(
                     "⚠️ Botdan foydalanish uchun avval quyidagi botga obuna bo'ling va /start bosing:\n\n"
                     "⬇️ Tugmani bosing:",
@@ -1245,14 +1235,12 @@ async def handle_message(update, context):
                 )
                 return
             else:
-                # started_at bor, lekin vaqt o'tmagan — detail = elapsed (o'tgan soniyalar)
                 remaining = VERIFICATION_WAIT_SECONDS - detail
                 await update.message.reply_text(
                     f"⏳ Iltimos, yana {remaining} soniya kuting va qayta yuboring."
                 )
                 return
 
-    # --- Raqam bo'lsa — kod sifatida qidirish ---
     if text.isdigit():
         code = text
 
@@ -1298,7 +1286,6 @@ async def handle_message(update, context):
         await send_movie_to_chat(update.message, code, data, user_id=user_id)
         return
 
-    # --- Matn bo'lsa — nom bo'yicha qidirish ---
     if len(text) < 2:
         await update.message.reply_text(
             "🔍 Kino kodini (raqam) yoki nomini yozing.\nMasalan: 25 yoki Ronaldo"
@@ -1343,7 +1330,6 @@ def build_application():
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN topilmadi.")
 
-    # DB ni botdan oldin ishga tushiramiz
     try:
         _init_db_client()
         client.admin.command("ping")
@@ -1355,6 +1341,10 @@ def build_application():
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_error_handler(log_error)
+
+    # BUG FIX: ConversationHandler.END o'rniga CONV_END ishlatilgani uchun
+    # bu yerda ham ConversationHandler.END ni CONV_END bilan bir xil qilib belgilash kerak
+    # python-telegram-bot da END = -1, shuning uchun CONV_END = -1 to'g'ri ishlaydi
 
     conv = ConversationHandler(
         entry_points=[
@@ -1396,6 +1386,7 @@ def build_application():
     app.add_handler(conv)
     app.add_handler(edit_conv)
 
+    # BUG FIX: Broadcast handler — foto/audio/voice/sticker uchun
     app.add_handler(MessageHandler(
         (filters.PHOTO | filters.AUDIO | filters.VOICE | filters.Sticker.ALL | filters.VIDEO_NOTE | filters.ANIMATION) & filters.User(ADMIN_ID),
         handle_admin_broadcast_message,
