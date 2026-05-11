@@ -14,7 +14,7 @@ except ImportError:
     from .keep_alive import keep_alive, set_health_state
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "8756688085"))
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "6102256074"))
 DEFAULT_INSTAGRAM_URL = "https://www.instagram.com/kinotop.bot/"
 INSTAGRAM_CHANNEL_URL = os.environ.get("INSTAGRAM_CHANNEL_URL", "https://www.instagram.com/movie.hub.star?igsh=MTduMjZlc2hyazB6cg==").strip() or DEFAULT_INSTAGRAM_URL
 
