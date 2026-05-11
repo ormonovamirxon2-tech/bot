@@ -1156,7 +1156,8 @@ async def show_favorites(update, context):
     code_to_nom = {m["code"]: m.get("nom", "-") for m in movies_info}
     lines = [f"❤️ Sevimli kinolaringiz ({len(fav_codes)} ta):\n"]
     for i, code in enumerate(fav_codes, start=1):
-        lines.append(f"{i}. {code_to_nom.get(code, 'Noma\\'lum')}  |  Kod: {code}")
+      nomalum = "Noma'lum"
+lines.append(f"{i}. {code_to_nom.get(code, nomalum)}  |  Kod: {code}")
     lines.append("\nKino olish uchun kodini yuboring.")
     await update.message.reply_text("\n".join(lines))
 
