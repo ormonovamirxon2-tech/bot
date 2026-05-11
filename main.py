@@ -45,7 +45,6 @@ ReplyKeyboardRemove = None
 MongoClient = None
 PyMongoError = Exception
 
-# ConversationHandler.END qiymati — lazy import muammosini hal qilish uchun
 CONV_END = -1
 
 
@@ -695,8 +694,6 @@ async def unknown_command(update, context):
 
 
 # ===================== VIDEO/DOCUMENT =====================
-# BUG FIX: ConversationHandler.END o'rniga CONV_END (-1) ishlatiladi
-# chunki ConversationHandler lazy import qilinadi va ba'zan None bo'lib qolishi mumkin
 
 async def handle_video(update, context):
     global _broadcast_active
@@ -1154,8 +1151,8 @@ async def show_favorites(update, context):
         await reply_service_unavailable(update)
         return
     code_to_nom = {m["code"]: m.get("nom", "-") for m in movies_info}
-  lines = [f"❤️ Sevimli kinolaringiz ({len(fav_codes)} ta):\n"]
     nomalum = "Noma'lum"
+    lines = [f"❤️ Sevimli kinolaringiz ({len(fav_codes)} ta):\n"]
     for i, code in enumerate(fav_codes, start=1):
         lines.append(f"{i}. {code_to_nom.get(code, nomalum)}  |  Kod: {code}")
     lines.append("\nKino olish uchun kodini yuboring.")
@@ -1343,10 +1340,6 @@ def build_application():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_error_handler(log_error)
 
-    # BUG FIX: ConversationHandler.END o'rniga CONV_END ishlatilgani uchun
-    # bu yerda ham ConversationHandler.END ni CONV_END bilan bir xil qilib belgilash kerak
-    # python-telegram-bot da END = -1, shuning uchun CONV_END = -1 to'g'ri ishlaydi
-
     conv = ConversationHandler(
         entry_points=[
             MessageHandler(filters.VIDEO & filters.User(ADMIN_ID), handle_video),
@@ -1387,7 +1380,6 @@ def build_application():
     app.add_handler(conv)
     app.add_handler(edit_conv)
 
-    # BUG FIX: Broadcast handler — foto/audio/voice/sticker uchun
     app.add_handler(MessageHandler(
         (filters.PHOTO | filters.AUDIO | filters.VOICE | filters.Sticker.ALL | filters.VIDEO_NOTE | filters.ANIMATION) & filters.User(ADMIN_ID),
         handle_admin_broadcast_message,
