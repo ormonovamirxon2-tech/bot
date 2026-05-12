@@ -147,10 +147,12 @@ def get_movies_col():
         folders_col = db["multfilm_folders"]
         users_col = db["users"]
         set_health_state(db="connected", last_error="")
+        logger.info("MongoDB ga muvaffaqiyatli ulandi.")
         return movies_col
     except Exception as exc:
         reset_db_connection()
         set_health_state(db="error", last_error=f"MongoDB: {exc}")
+        logger.error(f"MongoDB ulanish xatosi: {exc}")
         raise
 
 
@@ -623,13 +625,14 @@ def get_tracked_user_count():
 
 
 def remember_user(update):
+    """Foydalanuvchini DB ga saqlaydi. Xato bo'lsa log qiladi, lekin botni to'xtatmaydi."""
     user = update.effective_user
     if user is None:
         return
     try:
         track_user(user)
     except Exception:
-        logger.exception("Foydalanuvchini saqlashda xato yuz berdi")
+        logger.warning("Foydalanuvchini saqlashda xato (muhim emas, davom etilmoqda)")
 
 
 # ===================== TUGMALAR =====================
@@ -1012,24 +1015,55 @@ async def admin_stat(update, context):
 
 # ===================== VIDEO / DOCUMENT QABUL QILISH =====================
 
+def _get_file_id_from_message(message):
+    """
+    Xabardan file_id va file_type ni oladi.
+    Oddiy video, forward video (document sifatida kelishi mumkin) ni qo'llab-quvvatlaydi.
+    """
+    if message.video:
+        return message.video.file_id, "video"
+    if message.document:
+        mime = message.document.mime_type or ""
+        if mime.startswith("video/"):
+            return message.document.file_id, "video"
+        return message.document.file_id, "document"
+    return None, None
+
+
 async def handle_video(update, context):
     global _broadcast_active
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
         return
 
+    logger.info(f"Video/Document keldi. user_id={user_id}, ADMIN_ID={ADMIN_ID}")
+
     if _broadcast_active:
         await handle_admin_broadcast_message(update, context)
         return
 
-    context.user_data["file_id"] = update.message.video.file_id
-    context.user_data["file_type"] = "video"
-    try:
-        existing_movie = get_movie_by_file_id(context.user_data["file_id"])
-    except Exception:
-        logger.exception("Dublikat videoni tekshirishda xato yuz berdi")
-        await reply_service_unavailable(update)
+    # file_id va file_type ni xabardan olish
+    file_id, file_type = _get_file_id_from_message(update.message)
+    if not file_id:
+        await update.message.reply_text("⚠️ Fayl aniqlanmadi. Iltimos, video yuboring.")
         return ConversationHandler.END
+
+    context.user_data["file_id"] = file_id
+    context.user_data["file_type"] = file_type
+
+    # Dublikat tekshirish
+    try:
+        existing_movie = get_movie_by_file_id(file_id)
+    except Exception as e:
+        logger.exception(f"Dublikat videoni tekshirishda xato: {e}")
+        await update.message.reply_text(
+            "⚠️ MongoDB ga ulanishda xato yuz berdi.\n"
+            "Iltimos, MongoDB Atlas da:\n"
+            "1. Network Access → 0.0.0.0/0 qo'shing\n"
+            "2. Cluster to'xtatilmagan ekanini tekshiring"
+        )
+        return ConversationHandler.END
+
     if existing_movie:
         await update.message.reply_text(
             f"⚠️ Bu fayl allaqachon bazada mavjud\n"
@@ -1037,11 +1071,13 @@ async def handle_video(update, context):
             f"🎬 Nom: {existing_movie['nom']}"
         )
         return ConversationHandler.END
+
     context.user_data.pop("vaqt_draft", None)
     context.user_data.pop("vaqt_locked", None)
 
-    duration_seconds = update.message.video.duration
-    if duration_seconds:
+    # Video davomiyligi (faqat video uchun)
+    if update.message.video and update.message.video.duration:
+        duration_seconds = update.message.video.duration
         hours = duration_seconds // 3600
         minutes = (duration_seconds % 3600) // 60
         seconds = duration_seconds % 60
@@ -1070,18 +1106,32 @@ async def handle_document(update, context):
     if user_id != ADMIN_ID:
         return
 
+    logger.info(f"Document keldi. user_id={user_id}, ADMIN_ID={ADMIN_ID}")
+
     if _broadcast_active:
         await handle_admin_broadcast_message(update, context)
         return
 
-    context.user_data["file_id"] = update.message.document.file_id
-    context.user_data["file_type"] = "document"
-    try:
-        existing_movie = get_movie_by_file_id(context.user_data["file_id"])
-    except Exception:
-        logger.exception("Dublikat faylni tekshirishda xato yuz berdi")
-        await reply_service_unavailable(update)
+    file_id, file_type = _get_file_id_from_message(update.message)
+    if not file_id:
+        await update.message.reply_text("⚠️ Fayl aniqlanmadi.")
         return ConversationHandler.END
+
+    context.user_data["file_id"] = file_id
+    context.user_data["file_type"] = file_type
+
+    try:
+        existing_movie = get_movie_by_file_id(file_id)
+    except Exception as e:
+        logger.exception(f"Dublikat faylni tekshirishda xato: {e}")
+        await update.message.reply_text(
+            "⚠️ MongoDB ga ulanishda xato yuz berdi.\n"
+            "Iltimos, MongoDB Atlas da:\n"
+            "1. Network Access → 0.0.0.0/0 qo'shing\n"
+            "2. Cluster to'xtatilmagan ekanini tekshiring"
+        )
+        return ConversationHandler.END
+
     if existing_movie:
         await update.message.reply_text(
             f"⚠️ Bu fayl allaqachon bazada mavjud\n"
@@ -1089,6 +1139,7 @@ async def handle_document(update, context):
             f"🎬 Nom: {existing_movie['nom']}"
         )
         return ConversationHandler.END
+
     context.user_data.pop("vaqt_draft", None)
     context.user_data.pop("vaqt_locked", None)
 
@@ -1980,7 +2031,9 @@ def build_application():
 
     conv = ConversationHandler(
         entry_points=[
+            # Oddiy video va forward video (video sifatida kelsa)
             MessageHandler(filters.VIDEO & filters.User(ADMIN_ID), handle_video),
+            # Document (forward video document sifatida kelishi mumkin)
             MessageHandler(filters.Document.ALL & filters.User(ADMIN_ID), handle_document),
         ],
         states={
@@ -2054,13 +2107,12 @@ def build_application():
     return app
 
 
-# ===================== GRACEFUL SHUTDOWN (asosiy tuzatish) =====================
+# ===================== GRACEFUL SHUTDOWN =====================
 
 async def run_bot_async():
     set_health_state(bot="starting", last_error="")
     app = build_application()
 
-    # Eski webhook yoki conflict ni tozalash
     try:
         await app.bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook o'chirildi.")
@@ -2077,7 +2129,6 @@ async def run_bot_async():
     logger.info("Bot ishga tushdi...")
     set_health_state(bot="running", last_error="")
 
-    # SIGTERM va SIGINT signallarini ushlash (Render shutdown)
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -2089,10 +2140,8 @@ async def run_bot_async():
         loop.add_signal_handler(signal.SIGTERM, _stop)
         loop.add_signal_handler(signal.SIGINT, _stop)
     except NotImplementedError:
-        # Windows da signal handler ishlamaydi, muhim emas
         pass
 
-    # Signal kelguncha kutish
     await stop_event.wait()
 
     logger.info("Bot graceful shutdown boshlandi...")
