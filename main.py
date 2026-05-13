@@ -480,23 +480,49 @@ def is_favorite(user_id, code):
 # ===================== VERIFICATION =====================
 
 def mark_user_started(user_id):
+    """
+    Foydalanuvchi birinchi marta /start bosganda started_at saqlanadi.
+    15 soniya o'tgandan keyin is_verified = True qo'yiladi.
+    Bu funksiya faqat started_at ni bir marta yozadi.
+    """
     run_users_db(
         lambda col: col.update_one(
             {"user_id": user_id, "started_at": {"$exists": False}},
-            {"$set": {"started_at": int(time.time())}},
+            {"$set": {"started_at": int(time.time()), "is_verified": False}},
             upsert=True,
         )
     )
 
 
-def get_user_started_at(user_id):
+def get_user_verification_status(user_id):
+    """
+    Foydalanuvchining tekshiruv holatini qaytaradi.
+    Qaytaradi: (started_at, is_verified)
+    started_at = None bo'lsa — hech qachon /start bosmagan.
+    is_verified = True bo'lsa — allaqachon tasdiqlangan, qayta tekshirish shart emas.
+    """
     try:
-        doc = run_users_db(lambda col: col.find_one({"user_id": user_id}, {"started_at": 1, "_id": 0}))
-        if doc and "started_at" in doc:
-            return doc["started_at"]
-        return None
+        doc = run_users_db(lambda col: col.find_one(
+            {"user_id": user_id},
+            {"started_at": 1, "is_verified": 1, "_id": 0}
+        ))
+        if not doc:
+            return None, False
+        started_at = doc.get("started_at", None)
+        is_verified = doc.get("is_verified", False)
+        return started_at, is_verified
     except Exception:
-        return None
+        return None, False
+
+
+def mark_user_verified(user_id):
+    """Foydalanuvchini tasdiqlangan deb belgilaydi — qayta kutmasin."""
+    run_users_db(
+        lambda col: col.update_one(
+            {"user_id": user_id},
+            {"$set": {"is_verified": True}},
+        )
+    )
 
 
 def get_verification_keyboard():
@@ -505,7 +531,7 @@ def get_verification_keyboard():
     )
 
 
-# ===================== MULTFILM HELPERS =====================
+# ===================== FILM HELPERS =====================
 
 def get_movie_reply_markup(code, user_id=None):
     rows = []
@@ -517,7 +543,7 @@ def get_movie_reply_markup(code, user_id=None):
         fav_text = "❤️ Sevimlilardan chiqarish" if in_fav else "🤍 Sevimlilarga qo'shish"
         rows.append([InlineKeyboardButton(fav_text, callback_data=f"fav:{code}")])
     if INSTAGRAM_CHANNEL_URL:
-        rows.append([InlineKeyboardButton("Qolgan multfilm kodlarini ko'rish uchun bosing", url=INSTAGRAM_CHANNEL_URL)])
+        rows.append([InlineKeyboardButton("Qolgan film kodlarini ko'rish uchun bosing", url=INSTAGRAM_CHANNEL_URL)])
     if not rows:
         return None
     return InlineKeyboardMarkup(rows)
@@ -818,7 +844,7 @@ async def start(update, context):
     if user_id == ADMIN_ID:
         await update.message.reply_text(
             "👋 Salom, Admin!\n\n"
-            "📽 Multfilm qo'shish uchun video yoki fayl yuboring.",
+            "📽 Film qo'shish uchun video yoki fayl yuboring.",
             reply_markup=get_admin_menu_keyboard(),
         )
         return
@@ -829,18 +855,18 @@ async def start(update, context):
         logger.exception("Foydalanuvchi started_at ni saqlashda xato")
 
     await update.message.reply_text(
-        "🎬 Salom! Multfilm botiga xush kelibsiz!\n\n"
+        "🎬 Salom! Film botiga xush kelibsiz!\n\n"
         "Botdan foydalanish uchun quyidagi botga o'tib /start bosing:",
         reply_markup=get_verification_keyboard(),
     )
     await update.message.reply_text(
-        "⏳ Start bosgandan so'ng 10 soniya kuting, keyin multfilm kodini yuboring.",
+        "⏳ Start bosgandan so'ng 15 soniya kuting, keyin film kodini yuboring.",
         reply_markup=get_user_menu_keyboard(),
     )
 
 
 async def unknown_command(update, context):
-    await update.message.reply_text("❓ Bu komanda mavjud emas. FIlm kodini yozing.")
+    await update.message.reply_text("❓ Bu komanda mavjud emas. Film kodini yozing.")
 
 
 # ===================== BROADCAST =====================
@@ -954,12 +980,12 @@ async def admin_help(update, context):
 
     help_text = (
         "Admin buyruqlari:\n\n"
-        "Multfilm qo'shish:\n"
+        "Film qo'shish:\n"
         "  Video yoki fayl yuboring — kod, nom, sifat, til, vaqt so'raladi\n\n"
         "Tahrirlash:\n"
-        "  /edit — multfilm ma'lumotlarini yangilash\n\n"
+        "  /edit — film ma'lumotlarini yangilash\n\n"
         "O'chirish:\n"
-        "  /delete <kod> — multfilmni bazadan o'chirish\n\n"
+        "  /delete <kod> — filmni bazadan o'chirish\n\n"
         "Jildlar:\n"
         "  /jild — yangi jild yaratish\n\n"
         "Seriallar:\n"
@@ -967,7 +993,7 @@ async def admin_help(update, context):
         "Statistika:\n"
         "  /foydalanuvchi 777 — foydalanuvchilar soni\n"
         "  /stat — bot statistikasi\n"
-        "  /top — eng ko'p ko'rilgan 20 ta multfilm\n"
+        "  /top — eng ko'p ko'rilgan 20 ta film\n"
         "  /top 50 — eng ko'p ko'rilgan 50 ta (max 200)\n\n"
         "Ommaviy xabar:\n"
         "  /adminlik — barcha foydalanuvchilarga xabar yuborish\n"
@@ -975,7 +1001,7 @@ async def admin_help(update, context):
         "Sevimlilar:\n"
         "  /sevimli — o'z sevimlilar ro'yxatini ko'rish\n\n"
         "Lifehacklar:\n"
-        "  Multfilm yuklayotganda kod avtomatik tavsiya qilinadi\n"
+        "  Film yuklayotganda kod avtomatik tavsiya qilinadi\n"
         "  Til va sifat tugmalar bilan tanlanadi\n"
         "  Oldingi qiymatni saqlash uchun ♻️ tugmani bosing"
     )
@@ -1004,7 +1030,7 @@ async def admin_stat(update, context):
         f"📊 Statistika\n"
         f"{'─'*20}\n"
         f"👤 Foydalanuvchilar: {total_users} ta\n"
-        f"🎬 Multfilmlar: {total_movies} ta\n"
+        f"🎬 Filmlar: {total_movies} ta\n"
         f"📁 Jildlar: {total_folders} ta\n"
         f"📺 Seriallar: {total_series} ta\n"
         f"{'─'*20}\n"
@@ -1042,7 +1068,6 @@ async def handle_video(update, context):
         await handle_admin_broadcast_message(update, context)
         return
 
-    # file_id va file_type ni xabardan olish
     file_id, file_type = _get_file_id_from_message(update.message)
     if not file_id:
         await update.message.reply_text("⚠️ Fayl aniqlanmadi. Iltimos, video yuboring.")
@@ -1051,7 +1076,6 @@ async def handle_video(update, context):
     context.user_data["file_id"] = file_id
     context.user_data["file_type"] = file_type
 
-    # Dublikat tekshirish
     try:
         existing_movie = get_movie_by_file_id(file_id)
     except Exception as e:
@@ -1075,7 +1099,6 @@ async def handle_video(update, context):
     context.user_data.pop("vaqt_draft", None)
     context.user_data.pop("vaqt_locked", None)
 
-    # Video davomiyligi (faqat video uchun)
     if update.message.video and update.message.video.duration:
         duration_seconds = update.message.video.duration
         hours = duration_seconds // 3600
@@ -1204,7 +1227,7 @@ async def get_kod_vaqt(update, context):
 
     d["kod"] = code
     await update.message.reply_text(
-        "Multfilm nomini kiriting:",
+        "Film nomini kiriting:",
         reply_markup=ReplyKeyboardRemove(),
     )
     return NOM
@@ -1242,7 +1265,7 @@ async def get_til(update, context):
 
     auto_vaqt = context.user_data.get("vaqt", "-")
     await update.message.reply_text(
-        f"Davomiyligini kiriting yoki tavsiyani tanlang:",
+        "Davomiyligini kiriting yoki tavsiyani tanlang:",
         reply_markup=ReplyKeyboardMarkup(
             [[auto_vaqt, KEEP_PREVIOUS_TEXT]],
             resize_keyboard=True,
@@ -1285,7 +1308,7 @@ async def confirm_save(update, context):
     try:
         save_movie(code, data)
     except Exception:
-        logger.exception("Multfilmni saqlashda xato yuz berdi")
+        logger.exception("Filmni saqlashda xato yuz berdi")
         await reply_service_unavailable(update)
         return ConversationHandler.END
     d["last_sifat"] = d["sifat"]
@@ -1328,7 +1351,7 @@ async def save_to_folder_and_finish(update, context, folder_name):
         add_movie_to_folder(folder_name, code)
         movies = get_movies_for_folder(folder_name)
     except Exception:
-        logger.exception("Jildga multfilmni saqlashda xato yuz berdi")
+        logger.exception("Jildga filmni saqlashda xato yuz berdi")
         await reply_service_unavailable(update)
         return ConversationHandler.END
 
@@ -1530,7 +1553,7 @@ async def jild_get_name(update, context):
     await update.message.reply_text(
         f"✅ Jild {action_text}.\n"
         f"Nomi: {folder_name}\n"
-        f"Jilddagi multfilmlar: {len(folder_movies)} ta\n"
+        f"Jilddagi filmlar: {len(folder_movies)} ta\n"
         f"Kodlar: {format_codes_for_text([movie['code'] for movie in folder_movies])}",
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -1552,7 +1575,7 @@ async def edit_start(update, context):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
         return
-    await update.message.reply_text("Tahrirlash uchun Film kodini kiriting:")
+    await update.message.reply_text("Tahrirlash uchun film kodini kiriting:")
     return EDIT_KOD
 
 
@@ -1561,11 +1584,11 @@ async def edit_get_kod(update, context):
     try:
         data = get_movie(code)
     except Exception:
-        logger.exception("Multfilmni qidirishda xato yuz berdi")
+        logger.exception("Filmni qidirishda xato yuz berdi")
         await reply_service_unavailable(update)
         return ConversationHandler.END
     if not data:
-        await update.message.reply_text(f"❌ {code} kodli multfilm topilmadi.")
+        await update.message.reply_text(f"❌ {code} kodli film topilmadi.")
         return ConversationHandler.END
     context.user_data['edit_code'] = code
     context.user_data['current_data'] = data
@@ -1642,7 +1665,7 @@ async def edit_get_vaqt(update, context):
     try:
         save_movie(code, data)
     except Exception:
-        logger.exception("Multfilmni tahrirlashda xato yuz berdi")
+        logger.exception("Filmni tahrirlashda xato yuz berdi")
         await reply_service_unavailable(update)
         return ConversationHandler.END
     await update.message.reply_text(
@@ -1665,19 +1688,19 @@ async def delete_movie(update, context):
     try:
         exists = movie_exists(code)
     except Exception:
-        logger.exception("Multfilmni o'chirish uchun DB tekshiruvda xato yuz berdi")
+        logger.exception("Filmni o'chirish uchun DB tekshiruvda xato yuz berdi")
         await reply_service_unavailable(update)
         return
     if not exists:
-        await update.message.reply_text(f"❌ {code} kodli multfilm topilmadi.")
+        await update.message.reply_text(f"❌ {code} kodli film topilmadi.")
         return
     try:
         delete_movie_db(code)
     except Exception:
-        logger.exception("Multfilmni o'chirishda xato yuz berdi")
+        logger.exception("Filmni o'chirishda xato yuz berdi")
         await reply_service_unavailable(update)
         return
-    await update.message.reply_text(f"🗑️ {code} kodli multfilm o'chirildi.")
+    await update.message.reply_text(f"🗑️ {code} kodli film o'chirildi.")
 
 
 async def show_user_count(update, context):
@@ -1736,12 +1759,12 @@ async def handle_series_part_callback(update, context):
     try:
         data = get_movie(code)
     except Exception:
-        logger.exception("Qism bo'yicha multfilmni olishda xato yuz berdi")
+        logger.exception("Qism bo'yicha filmni olishda xato yuz berdi")
         await reply_service_unavailable(update)
         return
 
     if not data:
-        await query.message.reply_text(f"❌ {code} kodli multfilm topilmadi.")
+        await query.message.reply_text(f"❌ {code} kodli film topilmadi.")
         return
 
     increment_view_count(code)
@@ -1808,7 +1831,7 @@ async def show_favorites(update, context):
     if not fav_codes:
         await update.message.reply_text(
             "❤️ Sevimlilar ro'yxatingiz hali bo'sh.\n\n"
-            "Multfilm olganingizda pastdagi 🤍 tugmani bosing."
+            "Film olganingizda pastdagi 🤍 tugmani bosing."
         )
         return
 
@@ -1820,7 +1843,7 @@ async def show_favorites(update, context):
             ))
         )
     except Exception:
-        logger.exception("Sevimli multfilmlar ma'lumotlarini olishda xato")
+        logger.exception("Sevimli filmlar ma'lumotlarini olishda xato")
         await reply_service_unavailable(update)
         return
 
@@ -1869,15 +1892,15 @@ async def admin_top_movies(update, context):
 
         top_movies = run_db(operation)
     except Exception:
-        logger.exception("Top multfilmlarni olishda xato")
+        logger.exception("Top filmlarni olishda xato")
         await reply_service_unavailable(update)
         return
 
     if not top_movies:
-        await update.message.reply_text("Hali birorta ham multfilm ko'rilmagan.")
+        await update.message.reply_text("Hali birorta ham film ko'rilmagan.")
         return
 
-    lines = [f"Eng ko'p ko'rilgan {len(top_movies)} ta multfilm:\n"]
+    lines = [f"Eng ko'p ko'rilgan {len(top_movies)} ta film:\n"]
     for i, movie in enumerate(top_movies, start=1):
         nom = movie.get("nom", "-")
         code = movie.get("code", "-")
@@ -1945,33 +1968,53 @@ async def handle_message(update, context):
         await show_favorites(update, context)
         return
 
+    # ===================== VERIFICATION TEKSHIRUVI =====================
     if user_id != ADMIN_ID:
-        started_at = get_user_started_at(user_id)
+        try:
+            started_at, is_verified = get_user_verification_status(user_id)
+        except Exception:
+            started_at, is_verified = None, False
+
+        # Hech qachon /start bosmagan
         if started_at is None:
             await update.message.reply_text(
                 "Botdan foydalanish uchun quyidagi botga o'tib /start bosing:",
                 reply_markup=get_verification_keyboard(),
             )
-            await update.message.reply_text("⏳ Start bosgandan so'ng 10 soniya kuting.")
+            await update.message.reply_text("⏳ Start bosgandan so'ng 15 soniya kuting.")
             return
 
-        elapsed = int(time.time()) - started_at
-        if elapsed < VERIFICATION_WAIT_SECONDS:
-            remaining = VERIFICATION_WAIT_SECONDS - elapsed
-            await update.message.reply_text(
-                f"⏳ Iltimos, yana {remaining} soniya kuting va qayta yuboring."
-            )
-            return
+        # Allaqachon tasdiqlangan — to'g'ridan-to'g'ri o'tkazib yuborish
+        if is_verified:
+            pass  # quyida davom etadi
+        else:
+            elapsed = int(time.time()) - started_at
+            if elapsed < VERIFICATION_WAIT_SECONDS:
+                remaining = VERIFICATION_WAIT_SECONDS - elapsed
+                await update.message.reply_text(
+                    f"⏳ Iltimos, yana {remaining} soniya kuting va qayta yuboring."
+                )
+                return
+            else:
+                # 15 soniya o'tdi — foydalanuvchini tasdiqlangan deb belgilaymiz
+                try:
+                    mark_user_verified(user_id)
+                except Exception:
+                    logger.warning("Foydalanuvchini tasdiqlashda xato (muhim emas)")
+    # ===================== VERIFICATION TEKSHIRUVI TUGADI =====================
 
     if not text.isdigit():
-        await update.message.reply_text("🎬 Film kodini yuboring yoki ❤️ Sevimlilarim tugmasini bosing.", reply_markup=get_user_menu_keyboard())
+        await update.message.reply_text(
+            "🎬 Film kodini yuboring yoki ❤️ Sevimlilarim tugmasini bosing.",
+            reply_markup=get_user_menu_keyboard(),
+        )
         return
 
     code = text
     try:
         folder_data = get_folder_by_code(code)
     except Exception:
-        logger.exception("Multfilm jildini qidirishda xato yuz berdi")
+        logger.exception("Film jildini qidirishda xato yuz berdi")
         await reply_service_unavailable(update)
         return
 
@@ -1979,7 +2022,7 @@ async def handle_message(update, context):
         try:
             folder_movies = get_movies_for_folder(folder_data["name"])
         except Exception:
-            logger.exception("Jilddagi multfilmlarni olishda xato yuz berdi")
+            logger.exception("Jilddagi filmlarni olishda xato yuz berdi")
             await reply_service_unavailable(update)
             return
         if folder_movies:
@@ -1989,7 +2032,7 @@ async def handle_message(update, context):
     try:
         series_data = get_series_range_by_code(code)
     except Exception:
-        logger.exception("Multfilmni qidirishda xato yuz berdi")
+        logger.exception("Filmni qidirishda xato yuz berdi")
         await reply_service_unavailable(update)
         return
 
@@ -1997,7 +2040,7 @@ async def handle_message(update, context):
         try:
             movies = get_movies_in_range(series_data["start_code_num"], series_data["end_code_num"])
         except Exception:
-            logger.exception("Qismlar guruhidagi multfilmlarni olishda xato yuz berdi")
+            logger.exception("Qismlar guruhidagi filmlarni olishda xato yuz berdi")
             await reply_service_unavailable(update)
             return
         if movies:
@@ -2007,12 +2050,12 @@ async def handle_message(update, context):
     try:
         data = get_movie(code)
     except Exception:
-        logger.exception("Multfilmni qidirishda xato yuz berdi")
+        logger.exception("Filmni qidirishda xato yuz berdi")
         await reply_service_unavailable(update)
         return
 
     if not data:
-        await update.message.reply_text(f"❌ {code} kodli multfilm topilmadi.")
+        await update.message.reply_text(f"❌ {code} kodli film topilmadi.")
         return
 
     increment_view_count(code)
@@ -2031,9 +2074,7 @@ def build_application():
 
     conv = ConversationHandler(
         entry_points=[
-            # Oddiy video va forward video (video sifatida kelsa)
             MessageHandler(filters.VIDEO & filters.User(ADMIN_ID), handle_video),
-            # Document (forward video document sifatida kelishi mumkin)
             MessageHandler(filters.Document.ALL & filters.User(ADMIN_ID), handle_document),
         ],
         states={
