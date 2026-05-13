@@ -13,12 +13,18 @@ try:
 except ImportError:
     from .keep_alive import keep_alive, set_health_state
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "6102256074"))
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8600038509:AAH0eqX23fWQUVccm02l6uYmifHMfa8aNVE").strip()
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "7657019165"))
+SECOND_ADMIN_ID = int(os.environ.get("SECOND_ADMIN_ID", "6102256074"))
+
+ADMIN_IDS = {ADMIN_ID}
+if SECOND_ADMIN_ID:
+    ADMIN_IDS.add(SECOND_ADMIN_ID)
+
 DEFAULT_INSTAGRAM_URL = "https://www.instagram.com/multiklaar?igsh=MzQ3Z2dub3cyejV5&utm_source=qr"
 INSTAGRAM_CHANNEL_URL = os.environ.get("INSTAGRAM_CHANNEL_URL", "").strip() or DEFAULT_INSTAGRAM_URL
 
-VERIFICATION_BOT_URL = os.environ.get("VERIFICATION_BOT_URL", "https://t.me/muhammadjonov_7oo").strip()
+VERIFICATION_BOT_URL = os.environ.get("VERIFICATION_BOT_URL", "https://t.me/gram_prbot?start=7657019165").strip()
 VERIFICATION_WAIT_SECONDS = 15
 
 logging.basicConfig(
@@ -480,11 +486,6 @@ def is_favorite(user_id, code):
 # ===================== VERIFICATION =====================
 
 def mark_user_started(user_id):
-    """
-    Foydalanuvchi birinchi marta /start bosganda started_at saqlanadi.
-    15 soniya o'tgandan keyin is_verified = True qo'yiladi.
-    Bu funksiya faqat started_at ni bir marta yozadi.
-    """
     run_users_db(
         lambda col: col.update_one(
             {"user_id": user_id, "started_at": {"$exists": False}},
@@ -495,12 +496,6 @@ def mark_user_started(user_id):
 
 
 def get_user_verification_status(user_id):
-    """
-    Foydalanuvchining tekshiruv holatini qaytaradi.
-    Qaytaradi: (started_at, is_verified)
-    started_at = None bo'lsa — hech qachon /start bosmagan.
-    is_verified = True bo'lsa — allaqachon tasdiqlangan, qayta tekshirish shart emas.
-    """
     try:
         doc = run_users_db(lambda col: col.find_one(
             {"user_id": user_id},
@@ -516,7 +511,6 @@ def get_user_verification_status(user_id):
 
 
 def mark_user_verified(user_id):
-    """Foydalanuvchini tasdiqlangan deb belgilaydi — qayta kutmasin."""
     run_users_db(
         lambda col: col.update_one(
             {"user_id": user_id},
@@ -535,7 +529,7 @@ def get_verification_keyboard():
 
 def get_movie_reply_markup(code, user_id=None):
     rows = []
-    if user_id is not None and user_id != ADMIN_ID:
+    if user_id is not None and user_id not in ADMIN_IDS:
         try:
             in_fav = is_favorite(user_id, code)
         except Exception:
@@ -637,7 +631,7 @@ def track_user(user):
                     "username": user.username or "",
                     "first_name": user.first_name or "",
                     "last_name": user.last_name or "",
-                    "is_admin": user.id == ADMIN_ID,
+                    "is_admin": user.id in ADMIN_IDS,
                     "last_seen_at": int(time.time()),
                 }
             },
@@ -651,7 +645,6 @@ def get_tracked_user_count():
 
 
 def remember_user(update):
-    """Foydalanuvchini DB ga saqlaydi. Xato bo'lsa log qiladi, lekin botni to'xtatmaydi."""
     user = update.effective_user
     if user is None:
         return
@@ -841,7 +834,7 @@ async def start(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
 
-    if user_id == ADMIN_ID:
+    if user_id in ADMIN_IDS:
         await update.message.reply_text(
             "👋 Salom, Admin!\n\n"
             "📽 Film qo'shish uchun video yoki fayl yuboring.",
@@ -875,7 +868,7 @@ async def admin_broadcast_start(update, context):
     global _broadcast_active
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     _broadcast_active = True
@@ -888,7 +881,7 @@ async def admin_broadcast_start(update, context):
 async def admin_broadcast_stop(update, context):
     global _broadcast_active
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
     _broadcast_active = False
     await update.message.reply_text(
@@ -903,7 +896,7 @@ async def admin_broadcast_stop_callback(update, context):
     if query is None:
         return
     await query.answer()
-    if update.effective_user.id != ADMIN_ID:
+    if update.effective_user.id not in ADMIN_IDS:
         return
     _broadcast_active = False
     await query.message.reply_text(
@@ -918,7 +911,7 @@ async def handle_admin_broadcast_message(update, context):
         return
 
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     try:
@@ -975,7 +968,7 @@ async def handle_admin_broadcast_message(update, context):
 async def admin_help(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     help_text = (
@@ -1012,7 +1005,7 @@ async def admin_help(update, context):
 async def admin_stat(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     try:
@@ -1042,10 +1035,6 @@ async def admin_stat(update, context):
 # ===================== VIDEO / DOCUMENT QABUL QILISH =====================
 
 def _get_file_id_from_message(message):
-    """
-    Xabardan file_id va file_type ni oladi.
-    Oddiy video, forward video (document sifatida kelishi mumkin) ni qo'llab-quvvatlaydi.
-    """
     if message.video:
         return message.video.file_id, "video"
     if message.document:
@@ -1059,10 +1048,10 @@ def _get_file_id_from_message(message):
 async def handle_video(update, context):
     global _broadcast_active
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
-    logger.info(f"Video/Document keldi. user_id={user_id}, ADMIN_ID={ADMIN_ID}")
+    logger.info(f"Video/Document keldi. user_id={user_id}")
 
     if _broadcast_active:
         await handle_admin_broadcast_message(update, context)
@@ -1126,10 +1115,10 @@ async def handle_video(update, context):
 async def handle_document(update, context):
     global _broadcast_active
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
-    logger.info(f"Document keldi. user_id={user_id}, ADMIN_ID={ADMIN_ID}")
+    logger.info(f"Document keldi. user_id={user_id}")
 
     if _broadcast_active:
         await handle_admin_broadcast_message(update, context)
@@ -1450,7 +1439,7 @@ async def handle_folder_pick(update, context):
 async def jild_start(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return ConversationHandler.END
 
     context.user_data["jild_codes"] = []
@@ -1573,7 +1562,7 @@ async def cancel(update, context):
 async def edit_start(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
     await update.message.reply_text("Tahrirlash uchun film kodini kiriting:")
     return EDIT_KOD
@@ -1679,7 +1668,7 @@ async def edit_get_vaqt(update, context):
 
 async def delete_movie(update, context):
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
     if not context.args:
         await update.message.reply_text("Ishlatish: /delete <kod>")
@@ -1705,7 +1694,7 @@ async def delete_movie(update, context):
 
 async def show_user_count(update, context):
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
     if not context.args or context.args[0] != "777":
         await update.message.reply_text("Ishlatish: /foydalanuvchi 777")
@@ -1724,7 +1713,7 @@ async def show_user_count(update, context):
 async def list_series_ranges(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     try:
@@ -1870,7 +1859,7 @@ def increment_view_count(code):
 async def admin_top_movies(update, context):
     remember_user(update)
     user_id = update.message.from_user.id
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         return
 
     limit = 20
@@ -1932,12 +1921,12 @@ async def handle_message(update, context):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
 
-    if user_id == ADMIN_ID and _broadcast_active:
+    if user_id in ADMIN_IDS and _broadcast_active:
         await handle_admin_broadcast_message(update, context)
         return
 
     # Admin tugma shortcut lari
-    if user_id == ADMIN_ID:
+    if user_id in ADMIN_IDS:
         if text == "✏️ Tahrirlash":
             await edit_start(update, context)
             return
@@ -1969,13 +1958,12 @@ async def handle_message(update, context):
         return
 
     # ===================== VERIFICATION TEKSHIRUVI =====================
-    if user_id != ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         try:
             started_at, is_verified = get_user_verification_status(user_id)
         except Exception:
             started_at, is_verified = None, False
 
-        # Hech qachon /start bosmagan
         if started_at is None:
             await update.message.reply_text(
                 "Botdan foydalanish uchun quyidagi botga o'tib /start bosing:",
@@ -1984,9 +1972,8 @@ async def handle_message(update, context):
             await update.message.reply_text("⏳ Start bosgandan so'ng 15 soniya kuting.")
             return
 
-        # Allaqachon tasdiqlangan — to'g'ridan-to'g'ri o'tkazib yuborish
         if is_verified:
-            pass  # quyida davom etadi
+            pass
         else:
             elapsed = int(time.time()) - started_at
             if elapsed < VERIFICATION_WAIT_SECONDS:
@@ -1996,7 +1983,6 @@ async def handle_message(update, context):
                 )
                 return
             else:
-                # 15 soniya o'tdi — foydalanuvchini tasdiqlangan deb belgilaymiz
                 try:
                     mark_user_verified(user_id)
                 except Exception:
@@ -2072,21 +2058,23 @@ def build_application():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_error_handler(log_error)
 
+    admin_users_filter = filters.User(list(ADMIN_IDS))
+
     conv = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.VIDEO & filters.User(ADMIN_ID), handle_video),
-            MessageHandler(filters.Document.ALL & filters.User(ADMIN_ID), handle_document),
+            MessageHandler(filters.VIDEO & admin_users_filter, handle_video),
+            MessageHandler(filters.Document.ALL & admin_users_filter, handle_document),
         ],
         states={
-            KOD_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_kod_vaqt)],
-            NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_nom)],
-            SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_sifat)],
-            TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_til)],
-            VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), get_vaqt)],
-            CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), confirm_save)],
-            FOLDER_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_choice)],
-            FOLDER_CREATE: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_create)],
-            FOLDER_PICK: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), handle_folder_pick)],
+            KOD_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, get_kod_vaqt)],
+            NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, get_nom)],
+            SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, get_sifat)],
+            TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, get_til)],
+            VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, get_vaqt)],
+            CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, confirm_save)],
+            FOLDER_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, handle_folder_choice)],
+            FOLDER_CREATE: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, handle_folder_create)],
+            FOLDER_PICK: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, handle_folder_pick)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -2094,11 +2082,11 @@ def build_application():
     edit_conv = ConversationHandler(
         entry_points=[CommandHandler("edit", edit_start)],
         states={
-            EDIT_KOD: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_kod)],
-            EDIT_NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_nom)],
-            EDIT_SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_sifat)],
-            EDIT_TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_til)],
-            EDIT_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), edit_get_vaqt)],
+            EDIT_KOD: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, edit_get_kod)],
+            EDIT_NOM: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, edit_get_nom)],
+            EDIT_SIFAT: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, edit_get_sifat)],
+            EDIT_TIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, edit_get_til)],
+            EDIT_VAQT: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, edit_get_vaqt)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -2106,8 +2094,8 @@ def build_application():
     jild_conv = ConversationHandler(
         entry_points=[CommandHandler("jild", jild_start)],
         states={
-            JILD_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), jild_get_codes)],
-            JILD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.User(ADMIN_ID), jild_get_name)],
+            JILD_CODES: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, jild_get_codes)],
+            JILD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND & admin_users_filter, jild_get_name)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -2135,7 +2123,7 @@ def build_application():
             | filters.Sticker.ALL
             | filters.VIDEO_NOTE
             | filters.ANIMATION
-        ) & filters.User(ADMIN_ID),
+        ) & admin_users_filter,
         handle_admin_broadcast_message,
     ))
 
